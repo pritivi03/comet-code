@@ -1,8 +1,9 @@
 """Basic interactive CLI shell for Comet.
 
 For now this is a placeholder UI: it shows a space-themed banner with a
-comet graphic and gives the user a multi-line textbox to type into. It
-does not yet wire into the agent loop.
+comet graphic and gives the user a multi-line textbox to type into.
+Slash commands let the user inspect/switch the current mode and model.
+The agent loop is not yet wired in.
 """
 
 from __future__ import annotations
@@ -16,6 +17,9 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
+
+from cli.commands import handle_command
+from cli.state import ShellState
 
 
 # A small comet ASCII drawing. The trailing dots/dashes form the tail and
@@ -37,11 +41,9 @@ _TAGLINE = "agentic coding assistant — type a task below"
 
 def _build_banner() -> Panel:
     """Render the space banner with comet art and the ClaudeCode title."""
-    # Title styled with a cyan→magenta gradient feel.
     title = Text("ClaudeCode", style="bold bright_cyan")
     subtitle = Text(_TAGLINE, style="dim white")
 
-    # Color the comet art line-by-line for a gradient look.
     art = Text()
     palette = [
         "bright_white",
@@ -71,8 +73,12 @@ def _build_banner() -> Panel:
     )
 
 
-def _build_prompt_session() -> PromptSession:
-    """Build the prompt_toolkit session used for the textbox."""
+def _build_prompt_session(state: ShellState) -> PromptSession:
+    """Build the prompt_toolkit session used for the textbox.
+
+    The bottom toolbar reflects the live `ShellState` so mode/model
+    changes show up immediately after a slash command.
+    """
     bindings = KeyBindings()
 
     @bindings.add("c-d")
@@ -84,8 +90,22 @@ def _build_prompt_session() -> PromptSession:
         {
             "prompt": "ansibrightcyan bold",
             "continuation": "ansibrightblue",
+            "bottom-toolbar": "bg:#1a1a2e #c0c0ff",
+            "bottom-toolbar.mode": "bg:#1a1a2e ansibrightmagenta bold",
+            "bottom-toolbar.model": "bg:#1a1a2e ansibrightcyan bold",
+            "bottom-toolbar.label": "bg:#1a1a2e #8888aa",
         }
     )
+
+    def bottom_toolbar() -> HTML:
+        return HTML(
+            " <label>mode</label> <mode>{mode}</mode>"
+            "   <label>model</label> <model>{model}</model>"
+            "   <label>/help for commands</label>".format(
+                mode=state.mode.value,
+                model=state.model.label,
+            )
+        )
 
     return PromptSession(
         message=HTML("<prompt>› </prompt>"),
@@ -95,19 +115,23 @@ def _build_prompt_session() -> PromptSession:
         ),
         key_bindings=bindings,
         style=style,
+        bottom_toolbar=bottom_toolbar,
     )
 
 
 def run_shell() -> None:
     """Entrypoint for the interactive Comet shell."""
     console = Console()
+    state = ShellState()
+
     console.print()
     console.print(_build_banner())
     console.print(
-        "[dim]press [bold]esc → enter[/bold] to submit, [bold]ctrl-d[/bold] to quit[/dim]\n"
+        "[dim]press [bold]esc → enter[/bold] to submit, "
+        "[bold]ctrl-d[/bold] to quit, [bold]/help[/bold] for commands[/dim]\n"
     )
 
-    session = _build_prompt_session()
+    session = _build_prompt_session(state)
 
     while True:
         try:
@@ -119,15 +143,22 @@ def run_shell() -> None:
         text = text.strip()
         if not text:
             continue
-        if text in {"/exit", "/quit"}:
+
+        result = handle_command(text, console, state)
+        if result.should_exit:
             console.print("\n[bright_magenta]✦ goodbye[/bright_magenta]\n")
             return
+        if result.handled:
+            continue
 
         # Placeholder echo — the agent loop is not wired up yet.
         console.print(
             Panel(
                 Text(text, style="white"),
-                title="[bright_cyan]received[/bright_cyan]",
+                title=(
+                    f"[bright_cyan]received[/bright_cyan] "
+                    f"[dim]· {state.mode.value} · {state.model.label}[/dim]"
+                ),
                 border_style="cyan",
             )
         )
