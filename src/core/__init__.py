@@ -1,0 +1,1 @@
+"""Core orchestration: sessions, attempts, plans, packets."""

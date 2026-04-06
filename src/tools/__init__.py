@@ -1,0 +1,1 @@
+"""Tools exposed to the model (search, read, exec, diff)."""

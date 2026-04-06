@@ -1,0 +1,1 @@
+"""Hybrid retrieval (lexical + symbol + optional embeddings)."""

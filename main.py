@@ -1,16 +1,28 @@
-# This is a sample Python script.
+"""Comet entrypoint.
 
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
+Installed as the `comet` console script via pyproject.toml.
+"""
+
+from __future__ import annotations
+
+import typer
+
+from cli.ui import run_shell
+
+app = typer.Typer(
+    name="comet",
+    help="Comet — agentic CLI coding assistant.",
+    no_args_is_help=False,
+    add_completion=False,
+)
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press ⌘F8 to toggle the breakpoint.
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """Launch the interactive Comet shell when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        run_shell()
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+if __name__ == "__main__":
+    app()
