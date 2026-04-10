@@ -18,6 +18,7 @@ class ModelInfo:
 
 
 AVAILABLE_MODELS: list[ModelInfo] = [
+    ModelInfo("google/gemma-4-31b-it:free", "gemma", "Gemma 4 31B"),
     ModelInfo("anthropic/claude-sonnet-4.5", "sonnet",  "Claude Sonnet 4.5"),
     ModelInfo("anthropic/claude-opus-4.1",   "opus",    "Claude Opus 4.1"),
     ModelInfo("openai/gpt-5",                "gpt5",    "GPT-5"),
