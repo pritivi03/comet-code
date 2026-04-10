@@ -1,11 +1,11 @@
 import os
 from typing import Callable
 
-from models import ModelInfo
+from llm.models import ModelInfo
 import httpx, json
 
 class OpenRouterClient:
-    CHAT_COMPLETION_URL = "https://chat.openrouter.com/api/v1/chat/completions"
+    CHAT_COMPLETION_URL = "https://openrouter.ai/api/v1/chat/completions"
 
     def __init__(self):
         self.api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -22,8 +22,9 @@ class OpenRouterClient:
         }
 
         buffer = ""
-        with httpx.Client() as client:
+        with httpx.Client(timeout=httpx.Timeout(10.0, read=120.0)) as client:
             with client.stream("POST", OpenRouterClient.CHAT_COMPLETION_URL, headers=self.headers, json=payload) as r:
+                r.raise_for_status()
                 for chunk in r.iter_text():
                     buffer += chunk
                     while True:
@@ -40,7 +41,7 @@ class OpenRouterClient:
                                 data_obj = json.loads(data)
                                 content = data_obj["choices"][0]["delta"].get("content")
                                 if content:
-                                    print(content, end="", flush=True)
+                                    # print(content, end="", flush=True)
                                     callback_func(content)
                             except json.JSONDecodeError:
                                 pass

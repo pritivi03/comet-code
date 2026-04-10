@@ -26,9 +26,11 @@ AVAILABLE_MODELS: list[ModelInfo] = [
     ModelInfo("google/gemini-2.5-pro",       "gemini",  "Gemini 2.5 Pro"),
     ModelInfo("deepseek/deepseek-chat",      "deepseek", "DeepSeek V3"),
     ModelInfo("x-ai/grok-4",                 "grok",    "Grok 4"),
+    ModelInfo("qwen/qwen3-coder:free", "qwen", "QWEN 3 Coder"),
+    ModelInfo("openai/gpt-oss-120b", "gpt-oss", "GPT-OSS"),
 ]
 
-DEFAULT_MODEL: ModelInfo = AVAILABLE_MODELS[0]
+DEFAULT_MODEL: ModelInfo = AVAILABLE_MODELS[-1]
 
 
 def find_model(query: str) -> ModelInfo | None:

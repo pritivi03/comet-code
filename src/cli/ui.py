@@ -22,7 +22,10 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
 from cli.commands import handle_command
+from cli.render import render_step
 from cli.state import ShellState
+from core.orchestrator import Orchestrator
+from llm.openrouter_client import OpenRouterClient
 
 import os
 
@@ -202,6 +205,7 @@ def run_shell() -> None:
     """Entrypoint for the interactive Comet shell."""
     console = Console()
     state = ShellState()
+    orchestrator = Orchestrator(OpenRouterClient())
 
     console.print()
     console.print(_build_banner())
@@ -226,6 +230,13 @@ def run_shell() -> None:
             continue
 
         # Echo the user's message in a small panel above the input box
-        # (Claude Code style). Long inputs are truncated so the echo stays
-        # compact — the full text is preserved internally for the agent.
         console.print(_format_user_echo(text))
+
+        # Run the agent loop — spinner shows while waiting, render_step fires on each response
+        with console.status("[bright_cyan]☄  thinking...[/bright_cyan]", spinner="dots"):
+            orchestrator.run_task(
+                user_request=text,
+                mode=state.mode,
+                model=state.model,
+                on_step=lambda step: render_step(console, step),
+            )

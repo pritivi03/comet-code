@@ -4,7 +4,6 @@ from enum import Enum
 
 from pydantic import BaseModel
 
-from schemas.packet import ModelPacket
 from schemas.plan import Plan
 from schemas.tool import ActionStatus, ToolAction
 
@@ -45,7 +44,6 @@ class ModelResponse(BaseModel):
 
 class InteractionStep(BaseModel):
     step_number: int
-    packet: ModelPacket
 
     model_response_str: str
     model_response: ModelResponse

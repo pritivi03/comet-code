@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Callable
 
 from llm.models import ModelInfo
 from llm.openrouter_client import OpenRouterClient
@@ -20,14 +21,24 @@ MAX_STEPS_PER_ATTEMPT = 15
 
 def _parse_model_response(raw: str) -> ModelResponse:
     """Parse the raw LLM response string into a ModelResponse."""
-    return ModelResponse.model_validate_json(raw)
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+        text = text.rsplit("```", 1)[0]
+    return ModelResponse.model_validate_json(text.strip())
 
 
 class Orchestrator:
     def __init__(self, llm_client: OpenRouterClient) -> None:
         self.llm_client = llm_client
 
-    def run_task(self, user_request: str, mode: TaskMode, model: ModelInfo) -> TaskSession:
+    def run_task(
+        self,
+        user_request: str,
+        mode: TaskMode,
+        model: ModelInfo,
+        on_step: Callable[[InteractionStep], None] | None = None,
+    ) -> TaskSession:
         prompt_builder = PromptBuilder(mode)
         policy = get_mode_policy_for_task_mode(mode)
 
@@ -84,17 +95,27 @@ class Orchestrator:
                         )
 
                 elif model_response.type == ResponseType.EDITS and model_response.edits:
-                    attempt.edits = model_response.edits
-                    attempt.interaction_steps.append(step)
-                    break
+                    attempt.edits.extend(model_response.edits)
+                    edit_summary = "\n".join(
+                        f"[Edit proposed] {e.file_path} L{e.start_line}-{e.end_line}"
+                        for e in model_response.edits
+                    )
+                    PromptBuilder.append_tool_result(
+                        attempt.messages, "edits", edit_summary,
+                    )
 
                 elif model_response.type == ResponseType.FINAL:
                     attempt.summary = model_response.summary
                     attempt.status = AttemptStatus.SUCCESS
-                    attempt.interaction_steps.append(step)
-                    break
 
                 attempt.interaction_steps.append(step)
+
+                if on_step:
+                    on_step(step)
+
+                # Exit step loop if model is done (edits or final)
+                if model_response.type in (ResponseType.EDITS, ResponseType.FINAL):
+                    break
 
             # TODO: if edits were proposed, verify (tests/lint) and set status
             session.attempts.append(attempt)
