@@ -16,6 +16,7 @@ from core.nodes import (
 def build_agent_graph(
     llm,
     on_event=None,
+    request_approval=None,
 ):
     """Compile and return the agent StateGraph.
 
@@ -31,7 +32,7 @@ def build_agent_graph(
 
     # Nodes
     builder.add_node("call_llm", make_call_llm_node(llm, on_event))
-    builder.add_node("execute_tools", make_execute_tools_node(on_event))
+    builder.add_node("execute_tools", make_execute_tools_node(on_event, request_approval))
 
     # Entry point
     builder.set_entry_point("call_llm")

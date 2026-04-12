@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     model_slug: str    # ModelInfo.slug
     max_attempts: int  # from ModePolicy
     tool_style: str    # "native" | "json"
+    allow_mutating_tools: bool
 
     # ------------------------------------------------------------------ #
     # Written by nodes during a turn                                      #
@@ -39,7 +40,13 @@ class AgentState(TypedDict):
     repeat_call_streak: int
     last_call_fingerprint: str | None
     partial_findings: list[str]
+    evidence_notes: list[str]
+    failure_kind: str | None
+    force_answer: bool
+    estimated_prompt_tokens: int
+    estimated_completion_tokens: int
     final_summary: str | None
     final_explanation: str | None
     failure_reason: str | None
+    user_request: str
     is_done: bool

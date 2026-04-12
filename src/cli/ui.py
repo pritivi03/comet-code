@@ -7,9 +7,13 @@ and switch the current mode and model.
 
 from __future__ import annotations
 
+import difflib
+
 from rich.align import Align
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.text import Text
 
 from prompt_toolkit.application import Application
@@ -97,7 +101,7 @@ _INPUT_STYLE = Style.from_dict(
 def _read_boxed_input(state: ShellState) -> str:
     """Display a bordered text box and return the user's submitted text.
 
-    Submitted with esc → enter; plain enter inserts a newline. Ctrl-D / Ctrl-C
+    Submitted with enter; Ctrl-J inserts a newline. Ctrl-D / Ctrl-C
     raise EOFError / KeyboardInterrupt so the outer loop can exit cleanly.
     """
     text_area = TextArea(
@@ -112,12 +116,15 @@ def _read_boxed_input(state: ShellState) -> str:
     frame = Frame(text_area, title="comet")
 
     def get_toolbar() -> HTML:
+        tools_mode = "collapsed" if state.tool_view_collapsed else "expanded"
         return HTML(
             " <label>mode</label> <mode>{mode}</mode>"
             "   <label>model</label> <model>{model}</model>"
-            "   <label>esc·enter to submit · /help for commands</label>".format(
+            "   <label>tools</label> <mode>{tools}</mode>"
+            "   <label>enter submit · ctrl-j newline · ctrl-o toggle tools · /help</label>".format(
                 mode=state.mode.value,
                 model=state.model.label,
+                tools=tools_mode,
             )
         )
 
@@ -129,9 +136,13 @@ def _read_boxed_input(state: ShellState) -> str:
 
     kb = KeyBindings()
 
-    @kb.add("escape", "enter")
+    @kb.add("enter")
     def _submit(event):  # noqa: ANN001
         event.app.exit(result=text_area.text)
+
+    @kb.add("c-j")
+    def _newline(event):  # noqa: ANN001
+        event.current_buffer.insert_text("\n")
 
     @kb.add("c-d")
     def _eof(event):  # noqa: ANN001
@@ -140,6 +151,11 @@ def _read_boxed_input(state: ShellState) -> str:
     @kb.add("c-c")
     def _interrupt(event):  # noqa: ANN001
         event.app.exit(exception=KeyboardInterrupt)
+
+    @kb.add("c-o")
+    def _toggle_tools_view(event):  # noqa: ANN001
+        state.tool_view_collapsed = not state.tool_view_collapsed
+        event.app.invalidate()
 
     app: Application[str] = Application(
         layout=Layout(HSplit([frame, toolbar_window])),
@@ -193,6 +209,131 @@ def _format_user_echo(text: str) -> Panel:
     )
 
 
+def _format_tool_args(args: dict[str, object]) -> str:
+    if not args:
+        return "{}"
+    parts: list[str] = []
+    for key, value in args.items():
+        rendered = repr(value) if isinstance(value, str) else str(value)
+        parts.append(f"{key}={rendered}")
+    return " ".join(parts)
+
+
+def _preview_text_block(text: str, *, max_lines: int = 5, max_chars: int = 240) -> str:
+    lines = text.splitlines() or [text]
+    clipped = lines[:max_lines]
+    preview = "\n".join(clipped)
+    if len(preview) > max_chars:
+        preview = preview[: max_chars - 3].rstrip() + "..."
+    elif len(lines) > max_lines:
+        preview += "\n..."
+    return preview
+
+
+def _build_diff_renderable(old_text: str, new_text: str, max_lines: int = 30) -> Text:
+    """Return a Rich Text with colored unified-diff lines (red=removed, green=added)."""
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+    diff = list(difflib.unified_diff(old_lines, new_lines, lineterm="", n=3))
+    result = Text()
+    for i, line in enumerate(diff):
+        if i >= max_lines:
+            result.append("...\n", style="dim")
+            break
+        if line.startswith("---") or line.startswith("+++"):
+            result.append(line + "\n", style="dim")
+        elif line.startswith("@@"):
+            result.append(line + "\n", style="bold cyan")
+        elif line.startswith("-"):
+            result.append(line + "\n", style="bold red")
+        elif line.startswith("+"):
+            result.append(line + "\n", style="bold green")
+        else:
+            result.append(line + "\n", style="default")
+    if not diff:
+        result.append("(no changes)", style="dim")
+    return result
+
+
+def _format_proposal_lines(proposal: dict[str, object]) -> list[str | Text]:
+    tool_name = str(proposal.get("tool_name", "tool"))
+    args = proposal.get("args", {})
+    reason = str(proposal.get("reason") or "").strip()
+    safe_args = args if isinstance(args, dict) else {}
+
+    lines: list[str | Text] = []
+    if tool_name == "replace_text":
+        path = str(safe_args.get("path", ""))
+        replace_all_flag = bool(safe_args.get("replace_all", False))
+        old_text = str(safe_args.get("old_text", ""))
+        new_text = str(safe_args.get("new_text", ""))
+        lines.append(f"replace_text {path}".rstrip())
+        lines.append(f"mode: {'replace all matches' if replace_all_flag else 'replace first exact match'}")
+        if reason:
+            lines.append(f"why: {reason}")
+        lines.append(_build_diff_renderable(old_text, new_text))
+        return lines
+
+    if tool_name == "write_file":
+        path = str(safe_args.get("path", ""))
+        content = str(safe_args.get("content", ""))
+        create_dirs = bool(safe_args.get("create_dirs", False))
+        lines.append(f"write_file {path}".rstrip())
+        lines.append(f"create_dirs: {'true' if create_dirs else 'false'}")
+        if reason:
+            lines.append(f"why: {reason}")
+        lines.append("content:")
+        lines.append(_preview_text_block(content))
+        return lines
+
+    lines.append(f"{tool_name} {_format_tool_args(safe_args)}".rstrip())
+    if reason:
+        lines.append(f"why: {reason}")
+    return lines  # type: ignore[return-value]
+
+
+def _prompt_tool_approval(
+    console: Console,
+    live: Live,
+    renderer: EventRenderer,
+    proposals: list[dict[str, object]],
+) -> bool:
+    live.stop()
+    try:
+        renderer.persist_tool_history_snapshot()
+
+        renderables: list[object] = []
+        for idx, proposal in enumerate(proposals, start=1):
+            if idx > 1:
+                renderables.append(Text(""))
+            renderables.append(Text(f"{idx}.", style="bold"))
+            for item in _format_proposal_lines(proposal):
+                if isinstance(item, Text):
+                    renderables.append(Text.assemble(("   ", ""), item))
+                else:
+                    renderables.append(Text(f"   {item}"))
+
+        console.print(
+            Panel(
+                Group(*renderables),
+                title="[bold bright_cyan]proposed change[/bold bright_cyan]",
+                border_style="bright_blue",
+                padding=(0, 1),
+                expand=True,
+            )
+        )
+
+        answer = console.input("[bold bright_cyan]apply this change?[/bold bright_cyan] [dim](y/N)[/dim] ").strip().lower()
+        approved = answer in {"y", "yes"}
+        if approved:
+            console.print("[bright_cyan]approved[/bright_cyan]")
+        else:
+            console.print("[yellow]rejected[/yellow]")
+        return approved
+    finally:
+        live.start(refresh=True)
+
+
 # ---------------------------------------------------------------------------
 # Shell entrypoint
 # ---------------------------------------------------------------------------
@@ -229,17 +370,41 @@ def run_shell() -> None:
         # Echo the user's message in a small panel above the input box
         console.print(_format_user_echo(text))
 
+        renderer = EventRenderer(
+            console,
+            collapsed_tools=state.tool_view_collapsed,
+        )
+        spinner = Spinner(
+            "dots12",
+            text=renderer.get_status_text(),
+            style="bright_cyan",
+        )
+
+        def _build_run_live_display() -> Group:
+            spinner.update(text=renderer.get_status_text())
+            items: list[object] = [
+                spinner
+            ]
+            if renderer.should_render_live_tool_row():
+                items.append(renderer.build_live_tool_renderable())
+            return Group(*items)
+
         try:
-            with console.status(
-                "[bright_cyan]☄ actualizing star map...[/bright_cyan]",
-                spinner="dots12",
-            ) as status:
-                renderer = EventRenderer(console, set_status=status.update)
+            with Live(
+                console=console,
+                transient=True,
+                refresh_per_second=12,
+                get_renderable=_build_run_live_display,
+            ) as live:
                 orchestrator.run_task(
                     user_request=text,
                     mode=state.mode,
                     model=state.model,
                     on_event=renderer.render,
+                    request_approval=lambda proposals: _prompt_tool_approval(console, live, renderer, proposals),
                 )
         except Exception as exc:
             console.print(f"\n  [bold red]error:[/bold red] {exc}\n")
+        finally:
+            state.last_tool_history = renderer.get_tool_history()
+            console.print(Text(f"Cooked for {renderer.get_elapsed_str()}", style="dim"))

@@ -23,25 +23,66 @@ class Orchestrator:
         lines = [f"- {item}" for item in recent]
         return "Recent run artifacts:\n" + "\n".join(lines)
 
+    def _compose_failed_run_response(self, state: AgentState) -> str:
+        evidence_notes = list(state.get("evidence_notes", []))
+        failure_kind = state.get("failure_kind") or "insufficient_evidence"
+
+        if evidence_notes:
+            lines = ["I haven’t finished verifying this yet, but here’s the best answer I can give from what I already checked.", ""]
+            lines.append("The most relevant code I found was:")
+            lines.extend(f"- {item}" for item in evidence_notes[:4])
+            if failure_kind == "repeated_low_signal":
+                lines.extend(["", "I stopped there because the search had started looping without adding much new signal."])
+            elif failure_kind == "budget_exhausted":
+                lines.extend(["", "That should be enough to point the change in the right direction, even though I’d still want one more verification pass."])
+            lines.extend(["", "If you want, I can keep exploring and firm this up."])
+            return "\n".join(lines)
+
+        return "\n".join(
+            [
+                "I don’t have a fully verified answer yet, but I can keep exploring from here.",
+                "",
+                "If you want, I can continue and tighten this up.",
+            ]
+        )
+
     def run_task(
         self,
         user_request: str,
         mode: TaskMode,
         model: ModelInfo,
         on_event: Callable[[StreamEvent], None] | None = None,
+        request_approval: Callable[[list[dict[str, object]]], bool] | None = None,
     ) -> None:
         policy = get_mode_policy_for_task_mode(mode)
         tool_style = "native" if supports_native_tool_calling(model) else "json"
 
         llm = create_openrouter_llm(model)
-        graph = build_agent_graph(llm=llm, on_event=on_event)
+        graph = build_agent_graph(llm=llm, on_event=on_event, request_approval=request_approval)
 
         new_user_msg: dict = {"role": "user", "content": user_request}
         prior_non_system_messages: list[dict] = []
+        mode_changed = False
         if self._persistent_state is not None:
             prior_non_system_messages = [
                 m for m in self._persistent_state["messages"]
                 if m.get("role") != "system"
+            ]
+            prev_mode = self._persistent_state.get("mode")
+            mode_changed = prev_mode is not None and prev_mode != mode.value
+
+        if mode_changed:
+            prior_non_system_messages = [
+                *prior_non_system_messages,
+                {
+                    "role": "user",
+                    "content": (
+                        f"[mode changed to: {mode.value}] "
+                        f"The assistant mode has switched. "
+                        f"For this turn and all future turns, operate as a {mode.value} assistant."
+                    ),
+                },
+                {"role": "assistant", "content": f"Understood. Switching to {mode.value} mode."},
             ]
 
         base_turn_messages = [*prior_non_system_messages, new_user_msg]
@@ -49,12 +90,15 @@ class Orchestrator:
         prev_attempt_summary: str | None = self._build_recent_artifacts_summary()
         prev_failure_context: str | None = None
         final_state: AgentState | None = None
+        total_estimated_prompt_tokens = 0
+        total_estimated_completion_tokens = 0
 
         for attempt_idx in range(policy.max_attempts):
             system_content = PromptBuilder(mode).build_system_message(
                 response_style=tool_style,
                 previous_summary=prev_attempt_summary,
                 failure_context=prev_failure_context,
+                include_mutating_tools=policy.allow_edits,
             )
             attempt_messages = [
                 {"role": "system", "content": system_content},
@@ -78,6 +122,8 @@ class Orchestrator:
                 "model_slug": model.slug,
                 "max_attempts": policy.max_attempts,
                 "tool_style": tool_style,
+                "allow_mutating_tools": policy.allow_edits,
+                "user_request": user_request,
                 "attempt_number": attempt_idx,
                 "attempt_status": None,
                 "attempt_failure_reason": None,
@@ -89,6 +135,11 @@ class Orchestrator:
                 "repeat_call_streak": 0,
                 "last_call_fingerprint": None,
                 "partial_findings": [],
+                "evidence_notes": [],
+                "failure_kind": None,
+                "force_answer": False,
+                "estimated_prompt_tokens": 0,
+                "estimated_completion_tokens": 0,
                 "final_summary": None,
                 "final_explanation": None,
                 "failure_reason": None,
@@ -103,6 +154,8 @@ class Orchestrator:
                 raise
 
             final_state = attempt_state
+            total_estimated_prompt_tokens += attempt_state.get("estimated_prompt_tokens", 0)
+            total_estimated_completion_tokens += attempt_state.get("estimated_completion_tokens", 0)
             success = attempt_state.get("attempt_status") == "success" and bool(
                 (attempt_state.get("final_explanation") or "").strip()
             )
@@ -127,29 +180,9 @@ class Orchestrator:
             raise RuntimeError("No attempt state returned from graph execution.")
 
         if final_state.get("attempt_status") != "success":
-            partial_findings = final_state.get("partial_findings", [])
-            reason = (
-                final_state.get("attempt_failure_reason")
-                or final_state.get("failure_reason")
-                or "Could not converge to a final answer."
-            )
-            lines = [
-                "I couldn’t fully solve this within the current limits.",
-                "",
-                f"Reason: {reason}",
-            ]
-            if partial_findings:
-                lines.extend(["", "Partial findings:", *[f"- {line}" for line in partial_findings[:5]]])
-            lines.extend(
-                [
-                    "",
-                    "Next best step:",
-                    "- Ask a narrower query (specific file/import/symbol) and I’ll continue from there.",
-                ]
-            )
-            final_text = "\n".join(lines)
+            final_text = self._compose_failed_run_response(final_state)
             final_state["final_explanation"] = final_text
-            final_state["final_summary"] = "Run exhausted limits before converging."
+            final_state["final_summary"] = final_text.splitlines()[0] if final_text else "Run ended without a confident final answer."
             if on_event:
                 on_event(
                     StreamEvent(
@@ -162,6 +195,17 @@ class Orchestrator:
         if artifact:
             self._recent_run_artifacts.append(artifact)
             self._recent_run_artifacts = self._recent_run_artifacts[-5:]
+
+        if on_event:
+            on_event(
+                StreamEvent(
+                    type=EventType.USAGE,
+                    prompt_tokens=total_estimated_prompt_tokens,
+                    completion_tokens=total_estimated_completion_tokens,
+                    total_tokens=total_estimated_prompt_tokens + total_estimated_completion_tokens,
+                    estimated=True,
+                )
+            )
 
         self._persistent_state = final_state
 

@@ -17,6 +17,7 @@ class ActionStatus(str, Enum):
 class ToolAction(BaseModel):
     tool_name: str
     args: dict[str, Any] = Field(default_factory=dict)
+    reason: str | None = None
     status: ActionStatus = ActionStatus.PROPOSED
 
     output: str | None = None

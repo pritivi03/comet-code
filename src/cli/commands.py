@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from cli.state import ShellState
@@ -57,6 +58,8 @@ def _print_help(console: Console) -> None:
         ("/<mode>",          "shortcut: e.g. /plan, /debug, /explain, /refactor, /implement"),
         ("/model",           "show current model and list available models"),
         ("/model <name>",    "switch model (by alias, slug, or label)"),
+        ("/tools",           "show last run tool-call history"),
+        ("/tools <toggle|collapse|expand>", "set live tool view mode"),
         ("/clear",           "clear conversation history"),
         ("/exit, /quit",     "leave the shell"),
     ]
@@ -97,6 +100,42 @@ def _cmd_model(console: Console, state: ShellState, args: list[str]) -> None:
     )
 
 
+def _print_tool_history(console: Console, state: ShellState) -> None:
+    mode_label = "collapsed" if state.tool_view_collapsed else "expanded"
+    if not state.last_tool_history:
+        console.print(
+            f"[bright_cyan]tools view →[/bright_cyan] [bold]{mode_label}[/bold]  "
+            f"[dim](no tool history yet)[/dim]"
+        )
+        return
+
+    lines: list[str] = []
+    for idx, item in enumerate(state.last_tool_history, start=1):
+        status = item.get("status", "unknown")
+        tool_name = item.get("tool_name", "tool")
+        args_str = item.get("args_json", "{}")
+        lines.append(f"{idx}. {tool_name} {args_str} [{status}]")
+        reason = item.get("reason")
+        if reason:
+            lines.append(f"   why: {reason}")
+        preview = item.get("preview")
+        if preview:
+            lines.append(f"   {preview}")
+        error = item.get("error")
+        if error:
+            lines.append(f"   error: {error}")
+
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=f"[bold bright_cyan]tool history ({mode_label})[/bold bright_cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+            expand=True,
+        )
+    )
+
+
 def handle_command(
     text: str,
     console: Console,
@@ -130,7 +169,24 @@ def handle_command(
 
     if name == "clear":
         orchestrator.reset_history()
+        state.last_tool_history = []
         console.print("[bright_cyan]history cleared[/bright_cyan]")
+        return CommandResult(handled=True)
+
+    if name == "tools":
+        if args:
+            action = args[0].lower()
+            if action == "toggle":
+                state.tool_view_collapsed = not state.tool_view_collapsed
+            elif action == "collapse":
+                state.tool_view_collapsed = True
+            elif action == "expand":
+                state.tool_view_collapsed = False
+            else:
+                console.print("[red]unknown /tools option:[/red] " + action)
+                return CommandResult(handled=True)
+
+        _print_tool_history(console, state)
         return CommandResult(handled=True)
 
     # Mode shortcuts: /plan, /debug, /explain, /refactor, /implement

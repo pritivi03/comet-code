@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from llm.models import DEFAULT_MODEL, ModelInfo
 from schemas.task import TaskMode
@@ -14,3 +14,5 @@ class ShellState:
 
     mode: TaskMode = TaskMode.EXPLAIN
     model: ModelInfo = DEFAULT_MODEL
+    tool_view_collapsed: bool = True
+    last_tool_history: list[dict] = field(default_factory=list)

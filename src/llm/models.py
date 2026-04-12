@@ -26,7 +26,7 @@ AVAILABLE_MODELS: list[ModelInfo] = [
     ModelInfo("google/gemini-2.5-pro",       "gemini",  "Gemini 2.5 Pro"),
     ModelInfo("deepseek/deepseek-chat",      "deepseek", "DeepSeek V3"),
     ModelInfo("x-ai/grok-4",                 "grok",    "Grok 4"),
-    ModelInfo("qwen/qwen3-coder:free", "qwen", "QWEN 3 Coder"),
+    ModelInfo("qwen/qwen3.6-plus", "qwen", "QWEN 3 Coder"),
     ModelInfo("openai/gpt-oss-120b", "gpt-oss", "GPT-OSS"),
 ]
 

@@ -11,6 +11,7 @@ class EventType(str, Enum):
     TOOL_END = "tool_end"
     LIMIT = "limit"
     ATTEMPT_RETRY = "attempt_retry"
+    USAGE = "usage"
     FINAL = "final"
     ERROR = "error"
 
@@ -25,3 +26,8 @@ class StreamEvent(BaseModel):
     reason: str | None = None
     suggestion: str | None = None
     partial_findings: list[str] = Field(default_factory=list)
+    failure_kind: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    estimated: bool = True

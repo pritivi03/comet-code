@@ -33,7 +33,7 @@ _JSON_SYSTEM_PREAMBLE = (
     "{\n"
     '  "type": "tool_calls",\n'
     '  "tool_calls": [\n'
-    '    {"tool_name": "<name>", "args": {"arg_name": "value"}}\n'
+    '    {"tool_name": "<name>", "args": {"arg_name": "value"}, "reason": "<optional one-line why>"}\n'
     "  ]\n"
     "}\n"
     "```\n"
@@ -56,32 +56,47 @@ _TOOL_EXECUTION_POLICY = (
     "Keep using tools until you have enough concrete repo evidence to answer the user's request.\n"
     "When locating files, prefer filename-oriented tools (list/find) before content search.\n"
     "Use literal text search first; only use regex search when explicitly needed.\n"
+    "Budget tool usage. For follow-up edits or narrow requests, inspect the best candidate before doing another broad search.\n"
+    "Prefer targeted reads (`read_range`) over full-file reads when you already know the rough location.\n"
+    "Do not chain multiple broad searches across the whole repo when one promising file or symbol is already identified.\n"
     "If a tool returns no matches or low-signal output, try another tool call with refined arguments.\n"
     "Do not stop after a single failed tool call when the task is still unresolved.\n"
     "Only provide a final answer once you can cite concrete file/path evidence from tool results.\n"
+    "If you have enough evidence to give a best-effort answer, stop exploring and answer.\n"
+    "If you are running low on useful exploration, synthesize the best answer you can from the evidence already gathered instead of asking for more tool calls.\n"
+    "Before a non-trivial tool call, include a short one-line reason when helpful.\n"
+    "Skip the reason for obvious repetitive calls.\n"
     "Never return an empty final response."
 )
 
 _MODE_INSTRUCTIONS: dict[TaskMode, str] = {
     TaskMode.EXPLAIN: (
         "Your task is to explain code. "
-        "Use read-only tools if needed, then provide a clear explanation."
+        "Use read-only tools if needed, then provide a clear explanation. "
+        "IMPORTANT: You have NO ability to edit or create files in this mode. "
+        "If the user asks you to implement, add, change, or fix something, do NOT claim to have done it. "
+        "Instead, explain what would need to change and end with: "
+        "\"Switch to implement mode (/mode implement) if you'd like me to make these changes.\""
     ),
     TaskMode.DEBUG: (
-        "Your task is to debug. "
-        "In this stage, only repository exploration tools are available."
+        "Your task is to debug and fix the issue. "
+        "Use read-only tools to locate and understand the bug, then use write/replace tools to apply the fix."
     ),
     TaskMode.REFACTOR: (
-        "Your task is to refactor. "
-        "In this stage, only repository exploration tools are available."
+        "Your task is to refactor code. "
+        "Use read-only tools to understand the existing code, then use write/replace tools to apply the refactored version."
     ),
     TaskMode.IMPLEMENT: (
         "Your task is to implement a feature or change. "
-        "In this stage, only repository exploration tools are available."
+        "Use read-only tools to understand the codebase, then use write/replace tools to make the necessary edits. "
+        "Do not just explain what to do — actually write the code."
     ),
     TaskMode.PLAN: (
         "Your task is to produce a plan. "
-        "Use read-only tools if needed, then output a structured step-by-step plan."
+        "Use read-only tools if needed, then output a structured step-by-step plan. "
+        "IMPORTANT: You have NO ability to edit or create files in this mode. "
+        "Do not claim to have made any changes. "
+        "If the user wants changes applied, tell them to switch to implement mode (/mode implement)."
     ),
 }
 
@@ -108,10 +123,18 @@ class PromptBuilder:
         response_style: Literal["native", "json"] = "native",
         previous_summary: str | None = None,
         failure_context: str | None = None,
+        include_mutating_tools: bool = False,
     ) -> str:
-        tool_schema = "## Available Tools\n" + build_tool_schema_markdown()
+        tool_schema = "## Available Tools\n" + build_tool_schema_markdown(include_mutating=include_mutating_tools)
         base = _NATIVE_SYSTEM_PREAMBLE if response_style == "native" else _JSON_SYSTEM_PREAMBLE
         parts = [base, tool_schema, _TOOL_EXECUTION_POLICY, _MODE_INSTRUCTIONS[self._mode]]
+        if include_mutating_tools:
+            parts.append(
+                "## Mutation Policy\n"
+                "Mutating tools require explicit user approval before they run.\n"
+                "Use mutating tools only when needed to complete the task.\n"
+                "Prefer precise edits over whole-file rewrites when possible."
+            )
         if self._mode != TaskMode.PLAN:
             parts.append(_CONCISE_RESPONSE_INSTRUCTION)
 
@@ -131,11 +154,13 @@ class PromptBuilder:
         response_style: Literal["native", "json"] = "native",
         previous_summary: str | None = None,
         failure_context: str | None = None,
+        include_mutating_tools: bool = False,
     ) -> list[dict[str, str]]:
         system = self.build_system_message(
             response_style=response_style,
             previous_summary=previous_summary,
             failure_context=failure_context,
+            include_mutating_tools=include_mutating_tools,
         )
         return [
             {"role": "system", "content": system},
