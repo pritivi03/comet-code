@@ -12,5 +12,5 @@ from schemas.task import TaskMode
 class ShellState:
     """State carried across slash-command invocations within one shell session."""
 
-    mode: TaskMode = TaskMode.IMPLEMENT
+    mode: TaskMode = TaskMode.EXPLAIN
     model: ModelInfo = DEFAULT_MODEL

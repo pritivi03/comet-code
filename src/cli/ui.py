@@ -2,7 +2,7 @@
 
 Shows a space-themed banner, then loops on a bordered multi-line input
 box (opencode-style) for user tasks. Slash commands let the user inspect
-and switch the current mode and model. The agent loop is not yet wired in.
+and switch the current mode and model.
 """
 
 from __future__ import annotations
@@ -22,12 +22,9 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
 from cli.commands import handle_command
-from cli.render import render_step
+from cli.render import EventRenderer
 from cli.state import ShellState
 from core.orchestrator import Orchestrator
-from llm.openrouter_client import OpenRouterClient
-
-import os
 
 
 # A small comet ASCII drawing. The trailing dots/dashes form the tail and
@@ -205,7 +202,7 @@ def run_shell() -> None:
     """Entrypoint for the interactive Comet shell."""
     console = Console()
     state = ShellState()
-    orchestrator = Orchestrator(OpenRouterClient())
+    orchestrator = Orchestrator()
 
     console.print()
     console.print(_build_banner())
@@ -222,7 +219,7 @@ def run_shell() -> None:
         if not text:
             continue
 
-        result = handle_command(text, console, state)
+        result = handle_command(text, console, state, orchestrator)
         if result.should_exit:
             console.print("\n[bright_magenta]✦ goodbye[/bright_magenta]\n")
             return
@@ -232,11 +229,17 @@ def run_shell() -> None:
         # Echo the user's message in a small panel above the input box
         console.print(_format_user_echo(text))
 
-        # Run the agent loop — spinner shows while waiting, render_step fires on each response
-        with console.status("[bright_cyan]☄  thinking...[/bright_cyan]", spinner="dots"):
-            orchestrator.run_task(
-                user_request=text,
-                mode=state.mode,
-                model=state.model,
-                on_step=lambda step: render_step(console, step),
-            )
+        try:
+            with console.status(
+                "[bright_cyan]☄ actualizing star map...[/bright_cyan]",
+                spinner="dots12",
+            ) as status:
+                renderer = EventRenderer(console, set_status=status.update)
+                orchestrator.run_task(
+                    user_request=text,
+                    mode=state.mode,
+                    model=state.model,
+                    on_event=renderer.render,
+                )
+        except Exception as exc:
+            console.print(f"\n  [bold red]error:[/bold red] {exc}\n")

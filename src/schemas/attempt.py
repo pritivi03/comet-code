@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from schemas.plan import Plan
 from schemas.tool import ActionStatus, ToolAction
@@ -48,7 +48,7 @@ class InteractionStep(BaseModel):
     model_response_str: str
     model_response: ModelResponse
 
-    tool_actions: list[ToolAction] = []
+    tool_actions: list[ToolAction] = Field(default_factory=list)
 
 
 class AttemptRecord(BaseModel):
@@ -57,9 +57,9 @@ class AttemptRecord(BaseModel):
 
     plan: Plan | None = None
 
-    messages: list[dict[str, str]] = []
-    interaction_steps: list[InteractionStep] = []
-    edits: list[FileEdit] = []
+    messages: list[dict[str, str]] = Field(default_factory=list)
+    interaction_steps: list[InteractionStep] = Field(default_factory=list)
+    edits: list[FileEdit] = Field(default_factory=list)
 
     summary: str | None = None
     failure_reason: str | None = None

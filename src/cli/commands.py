@@ -8,12 +8,12 @@ doesn't start with `/` is treated as a user task and handled by the shell.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
 
 from rich.console import Console
 from rich.table import Table
 
 from cli.state import ShellState
+from core.orchestrator import Orchestrator
 from llm.models import AVAILABLE_MODELS, find_model
 from schemas.task import TaskMode
 
@@ -57,6 +57,7 @@ def _print_help(console: Console) -> None:
         ("/<mode>",          "shortcut: e.g. /plan, /debug, /explain, /refactor, /implement"),
         ("/model",           "show current model and list available models"),
         ("/model <name>",    "switch model (by alias, slug, or label)"),
+        ("/clear",           "clear conversation history"),
         ("/exit, /quit",     "leave the shell"),
     ]
     for cmd, desc in rows:
@@ -96,7 +97,12 @@ def _cmd_model(console: Console, state: ShellState, args: list[str]) -> None:
     )
 
 
-def handle_command(text: str, console: Console, state: ShellState) -> CommandResult:
+def handle_command(
+    text: str,
+    console: Console,
+    state: ShellState,
+    orchestrator: Orchestrator,
+) -> CommandResult:
     """Dispatch a slash-prefixed line. Non-slash lines return handled=False."""
     if not text.startswith("/"):
         return CommandResult(handled=False)
@@ -120,6 +126,11 @@ def handle_command(text: str, console: Console, state: ShellState) -> CommandRes
 
     if name == "model":
         _cmd_model(console, state, args)
+        return CommandResult(handled=True)
+
+    if name == "clear":
+        orchestrator.reset_history()
+        console.print("[bright_cyan]history cleared[/bright_cyan]")
         return CommandResult(handled=True)
 
     # Mode shortcuts: /plan, /debug, /explain, /refactor, /implement

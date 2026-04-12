@@ -1,132 +1,170 @@
 from __future__ import annotations
 
-import uuid
 from typing import Callable
 
+from core.graph import build_agent_graph
+from core.graph_state import AgentState
 from llm.models import ModelInfo
-from llm.openrouter_client import OpenRouterClient
+from llm.openrouter_client import create_openrouter_llm, supports_native_tool_calling
 from llm.prompts import PromptBuilder
-from schemas.attempt import (
-    AttemptRecord,
-    AttemptStatus,
-    InteractionStep,
-    ModelResponse,
-    ResponseType,
-)
-from schemas.session import TaskSession, SessionStatus, SharedContext
+from schemas.events import EventType, StreamEvent
 from schemas.task import TaskMode, get_mode_policy_for_task_mode
-
-MAX_STEPS_PER_ATTEMPT = 15
-
-
-def _parse_model_response(raw: str) -> ModelResponse:
-    """Parse the raw LLM response string into a ModelResponse."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1]
-        text = text.rsplit("```", 1)[0]
-    return ModelResponse.model_validate_json(text.strip())
 
 
 class Orchestrator:
-    def __init__(self, llm_client: OpenRouterClient) -> None:
-        self.llm_client = llm_client
+    def __init__(self) -> None:
+        self._persistent_state: AgentState | None = None
+        self._recent_run_artifacts: list[str] = []
+
+    def _build_recent_artifacts_summary(self) -> str | None:
+        if not self._recent_run_artifacts:
+            return None
+        recent = self._recent_run_artifacts[-3:]
+        lines = [f"- {item}" for item in recent]
+        return "Recent run artifacts:\n" + "\n".join(lines)
 
     def run_task(
         self,
         user_request: str,
         mode: TaskMode,
         model: ModelInfo,
-        on_step: Callable[[InteractionStep], None] | None = None,
-    ) -> TaskSession:
-        prompt_builder = PromptBuilder(mode)
+        on_event: Callable[[StreamEvent], None] | None = None,
+    ) -> None:
         policy = get_mode_policy_for_task_mode(mode)
+        tool_style = "native" if supports_native_tool_calling(model) else "json"
 
-        session = TaskSession(
-            session_id=uuid.uuid4().hex,
-            repo_root=".",
-            user_request=user_request,
-            mode=mode,
-            status=SessionStatus.RUNNING,
-            shared_context=SharedContext(available_tools=[]),
-            chunk_store={},
-        )
+        llm = create_openrouter_llm(model)
+        graph = build_agent_graph(llm=llm, on_event=on_event)
 
-        prev_attempt: AttemptRecord | None = None
+        new_user_msg: dict = {"role": "user", "content": user_request}
+        prior_non_system_messages: list[dict] = []
+        if self._persistent_state is not None:
+            prior_non_system_messages = [
+                m for m in self._persistent_state["messages"]
+                if m.get("role") != "system"
+            ]
 
-        for attempt_num in range(policy.max_attempts):
-            attempt = AttemptRecord(
-                attempt_number=attempt_num,
-                status=AttemptStatus.RUNNING,
+        base_turn_messages = [*prior_non_system_messages, new_user_msg]
+
+        prev_attempt_summary: str | None = self._build_recent_artifacts_summary()
+        prev_failure_context: str | None = None
+        final_state: AgentState | None = None
+
+        for attempt_idx in range(policy.max_attempts):
+            system_content = PromptBuilder(mode).build_system_message(
+                response_style=tool_style,
+                previous_summary=prev_attempt_summary,
+                failure_context=prev_failure_context,
             )
-
-            # Seed messages — clean context, with retry info if applicable
-            attempt.messages = prompt_builder.build_initial_messages(
-                user_request,
-                previous_summary=prev_attempt.summary if prev_attempt else None,
-                failure_context=prev_attempt.failure_reason if prev_attempt else None,
-            )
-
-            for step_num in range(MAX_STEPS_PER_ATTEMPT):
-                # Send to LLM and collect full response
-                response_buf: list[str] = []
-                self.llm_client.fetch(attempt.messages, model, response_buf.append)
-                raw_response = "".join(response_buf)
-
-                PromptBuilder.append_assistant_message(attempt.messages, raw_response)
-
-                # Parse structured response
-                model_response = _parse_model_response(raw_response)
-
-                step = InteractionStep(
-                    step_number=step_num,
-                    model_response_str=raw_response,
-                    model_response=model_response,
+            attempt_messages = [
+                {"role": "system", "content": system_content},
+                *base_turn_messages,
+            ]
+            if attempt_idx > 0 and prev_failure_context:
+                attempt_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Previous attempt failed. Try a different approach and avoid repeating "
+                            "the same low-signal tool calls.\n"
+                            f"Failure context: {prev_failure_context}"
+                        ),
+                    }
                 )
 
-                if model_response.type == ResponseType.TOOL_CALLS and model_response.tool_calls:
-                    for tool_action in model_response.tool_calls:
-                        # TODO: execute tool, set tool_action.status and .output
-                        pass
-                    step.tool_actions = model_response.tool_calls
-                    for ta in step.tool_actions:
-                        PromptBuilder.append_tool_result(
-                            attempt.messages, ta.tool_name, ta.output or "",
-                        )
+            turn_input: AgentState = {
+                "messages": attempt_messages,
+                "mode": mode.value,
+                "model_slug": model.slug,
+                "max_attempts": policy.max_attempts,
+                "tool_style": tool_style,
+                "attempt_number": attempt_idx,
+                "attempt_status": None,
+                "attempt_failure_reason": None,
+                "step_number": 0,
+                "response_type": None,
+                "pending_tool_calls": [],
+                "tool_calls_used": 0,
+                "consecutive_no_signal": 0,
+                "repeat_call_streak": 0,
+                "last_call_fingerprint": None,
+                "partial_findings": [],
+                "final_summary": None,
+                "final_explanation": None,
+                "failure_reason": None,
+                "is_done": False,
+            }
 
-                elif model_response.type == ResponseType.EDITS and model_response.edits:
-                    attempt.edits.extend(model_response.edits)
-                    edit_summary = "\n".join(
-                        f"[Edit proposed] {e.file_path} L{e.start_line}-{e.end_line}"
-                        for e in model_response.edits
-                    )
-                    PromptBuilder.append_tool_result(
-                        attempt.messages, "edits", edit_summary,
-                    )
+            try:
+                attempt_state = graph.invoke(turn_input)
+            except Exception as exc:
+                if on_event:
+                    on_event(StreamEvent(type=EventType.ERROR, error=str(exc)))
+                raise
 
-                elif model_response.type == ResponseType.FINAL:
-                    attempt.summary = model_response.summary
-                    attempt.status = AttemptStatus.SUCCESS
-
-                attempt.interaction_steps.append(step)
-
-                if on_step:
-                    on_step(step)
-
-                # Exit step loop if model is done (edits or final)
-                if model_response.type in (ResponseType.EDITS, ResponseType.FINAL):
-                    break
-
-            # TODO: if edits were proposed, verify (tests/lint) and set status
-            session.attempts.append(attempt)
-            prev_attempt = attempt
-
-            if attempt.status == AttemptStatus.SUCCESS:
+            final_state = attempt_state
+            success = attempt_state.get("attempt_status") == "success" and bool(
+                (attempt_state.get("final_explanation") or "").strip()
+            )
+            if success:
                 break
 
-        session.status = (
-            SessionStatus.SUCCESS
-            if any(a.status == AttemptStatus.SUCCESS for a in session.attempts)
-            else SessionStatus.FAILED
-        )
-        return session
+            prev_attempt_summary = attempt_state.get("final_summary") or prev_attempt_summary
+            prev_failure_context = (
+                attempt_state.get("attempt_failure_reason")
+                or attempt_state.get("failure_reason")
+                or "Attempt ended without a converged answer."
+            )
+            if on_event and attempt_idx < policy.max_attempts - 1:
+                on_event(
+                    StreamEvent(
+                        type=EventType.ATTEMPT_RETRY,
+                        reason=prev_failure_context,
+                    )
+                )
+
+        if final_state is None:
+            raise RuntimeError("No attempt state returned from graph execution.")
+
+        if final_state.get("attempt_status") != "success":
+            partial_findings = final_state.get("partial_findings", [])
+            reason = (
+                final_state.get("attempt_failure_reason")
+                or final_state.get("failure_reason")
+                or "Could not converge to a final answer."
+            )
+            lines = [
+                "I couldn’t fully solve this within the current limits.",
+                "",
+                f"Reason: {reason}",
+            ]
+            if partial_findings:
+                lines.extend(["", "Partial findings:", *[f"- {line}" for line in partial_findings[:5]]])
+            lines.extend(
+                [
+                    "",
+                    "Next best step:",
+                    "- Ask a narrower query (specific file/import/symbol) and I’ll continue from there.",
+                ]
+            )
+            final_text = "\n".join(lines)
+            final_state["final_explanation"] = final_text
+            final_state["final_summary"] = "Run exhausted limits before converging."
+            if on_event:
+                on_event(
+                    StreamEvent(
+                        type=EventType.FINAL,
+                        text=final_text,
+                    )
+                )
+
+        artifact = final_state.get("final_summary") or final_state.get("attempt_failure_reason")
+        if artifact:
+            self._recent_run_artifacts.append(artifact)
+            self._recent_run_artifacts = self._recent_run_artifacts[-5:]
+
+        self._persistent_state = final_state
+
+    def reset_history(self) -> None:
+        self._persistent_state = None
+        self._recent_run_artifacts = []

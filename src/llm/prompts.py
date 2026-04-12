@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from schemas.task import TaskMode
+from tools import build_tool_schema_markdown
 
 
-_SYSTEM_PREAMBLE = (
+_NATIVE_SYSTEM_PREAMBLE = (
+    "You are Comet, an autonomous coding assistant. "
+    "You operate on a real codebase using tools. "
+    "Be precise, minimal, and grounded — never guess at file contents or repo state.\n"
+    "\n"
+    "Use tools whenever codebase inspection is needed. "
+    "Do not invent file contents."
+)
+
+_JSON_SYSTEM_PREAMBLE = (
     "You are Comet, an autonomous coding assistant. "
     "You operate on a real codebase using tools. "
     "Be precise, minimal, and grounded — never guess at file contents or repo state.\n"
     "\n"
     "## Response Format\n"
     "\n"
-    "You MUST respond with valid JSON matching one of these three response types.\n"
+    "You MUST respond with valid JSON matching one of these two response types.\n"
     "Every response must have a \"type\" field.\n"
     "\n"
     "### type: \"tool_calls\"\n"
@@ -21,24 +33,7 @@ _SYSTEM_PREAMBLE = (
     "{\n"
     '  "type": "tool_calls",\n'
     '  "tool_calls": [\n'
-    '    {"tool_name": "<name>", "args": ["<arg1>", "<arg2>"]}\n'
-    "  ]\n"
-    "}\n"
-    "```\n"
-    "\n"
-    "### type: \"edits\"\n"
-    "Propose file edits. Each edit targets a specific line range.\n"
-    "```json\n"
-    "{\n"
-    '  "type": "edits",\n'
-    '  "edits": [\n'
-    "    {\n"
-    '      "file_path": "<path>",\n'
-    '      "start_line": 10,\n'
-    '      "end_line": 15,\n'
-    '      "original": "<original text at those lines>",\n'
-    '      "replacement": "<new text>"\n'
-    "    }\n"
+    '    {"tool_name": "<name>", "args": {"arg_name": "value"}}\n'
     "  ]\n"
     "}\n"
     "```\n"
@@ -56,33 +51,45 @@ _SYSTEM_PREAMBLE = (
     "Do NOT include any text outside the JSON object. Respond with raw JSON only."
 )
 
+_TOOL_EXECUTION_POLICY = (
+    "## Tool Execution Policy\n"
+    "Keep using tools until you have enough concrete repo evidence to answer the user's request.\n"
+    "When locating files, prefer filename-oriented tools (list/find) before content search.\n"
+    "Use literal text search first; only use regex search when explicitly needed.\n"
+    "If a tool returns no matches or low-signal output, try another tool call with refined arguments.\n"
+    "Do not stop after a single failed tool call when the task is still unresolved.\n"
+    "Only provide a final answer once you can cite concrete file/path evidence from tool results.\n"
+    "Never return an empty final response."
+)
+
 _MODE_INSTRUCTIONS: dict[TaskMode, str] = {
     TaskMode.EXPLAIN: (
         "Your task is to explain code. "
-        "Do not propose edits or run commands. "
-        "Provide a clear, structured explanation of how the relevant code works."
+        "Use read-only tools if needed, then provide a clear explanation."
     ),
     TaskMode.DEBUG: (
-        "Your task is to find and fix a bug. "
-        "Use tools to investigate, identify the root cause, and propose minimal edits to fix it. "
-        "After editing, verification will run automatically."
+        "Your task is to debug. "
+        "In this stage, only repository exploration tools are available."
     ),
     TaskMode.REFACTOR: (
-        "Your task is to refactor code. "
-        "Preserve existing behavior while improving structure, clarity, or performance. "
-        "Use tools to understand the code before proposing edits."
+        "Your task is to refactor. "
+        "In this stage, only repository exploration tools are available."
     ),
     TaskMode.IMPLEMENT: (
         "Your task is to implement a feature or change. "
-        "Use tools to understand the existing codebase, then propose edits. "
-        "Keep changes focused on what was requested."
+        "In this stage, only repository exploration tools are available."
     ),
     TaskMode.PLAN: (
         "Your task is to produce a plan. "
-        "Do not propose edits or run commands. "
-        "Analyze the request and output a structured, step-by-step plan."
+        "Use read-only tools if needed, then output a structured step-by-step plan."
     ),
 }
+
+_CONCISE_RESPONSE_INSTRUCTION = (
+    "## Response Style\n"
+    "For modes other than plan, keep responses concise and high-signal. "
+    "Default to 1-3 short paragraphs. Use bullets only when they improve clarity."
+)
 
 
 class PromptBuilder:
@@ -98,10 +105,15 @@ class PromptBuilder:
 
     def build_system_message(
         self,
+        response_style: Literal["native", "json"] = "native",
         previous_summary: str | None = None,
         failure_context: str | None = None,
     ) -> str:
-        parts = [_SYSTEM_PREAMBLE, _MODE_INSTRUCTIONS[self._mode]]
+        tool_schema = "## Available Tools\n" + build_tool_schema_markdown()
+        base = _NATIVE_SYSTEM_PREAMBLE if response_style == "native" else _JSON_SYSTEM_PREAMBLE
+        parts = [base, tool_schema, _TOOL_EXECUTION_POLICY, _MODE_INSTRUCTIONS[self._mode]]
+        if self._mode != TaskMode.PLAN:
+            parts.append(_CONCISE_RESPONSE_INSTRUCTION)
 
         if previous_summary or failure_context:
             retry_section = "\n## Previous Attempt"
@@ -116,10 +128,15 @@ class PromptBuilder:
     def build_initial_messages(
         self,
         user_request: str,
+        response_style: Literal["native", "json"] = "native",
         previous_summary: str | None = None,
         failure_context: str | None = None,
     ) -> list[dict[str, str]]:
-        system = self.build_system_message(previous_summary, failure_context)
+        system = self.build_system_message(
+            response_style=response_style,
+            previous_summary=previous_summary,
+            failure_context=failure_context,
+        )
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": user_request},

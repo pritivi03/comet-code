@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ActionStatus(str, Enum):
@@ -15,7 +16,7 @@ class ActionStatus(str, Enum):
 
 class ToolAction(BaseModel):
     tool_name: str
-    args: list[str]
+    args: dict[str, Any] = Field(default_factory=dict)
     status: ActionStatus = ActionStatus.PROPOSED
 
     output: str | None = None

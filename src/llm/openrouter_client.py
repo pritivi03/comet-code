@@ -1,47 +1,28 @@
 import os
-from typing import Callable
+from typing import Final
+
+from langchain_openai import ChatOpenAI
 
 from llm.models import ModelInfo
-import httpx, json
 
-class OpenRouterClient:
-    CHAT_COMPLETION_URL = "https://openrouter.ai/api/v1/chat/completions"
+_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+_NATIVE_TOOL_MODEL_PREFIXES: Final[tuple[str, ...]] = (
+    "openai/",
+    "anthropic/",
+    "google/gemini",
+    "x-ai/",
+    "deepseek/",
+)
 
-    def __init__(self):
-        self.api_key = os.environ.get("OPENROUTER_API_KEY")
-        self.headers = headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
 
-    def fetch(self, messages: list[dict], model_info: ModelInfo, callback_func: Callable[[str], None]):
-        payload = {
-            "model": model_info.slug,
-            "messages": messages,
-            "stream": True
-        }
+def create_openrouter_llm(model_info: ModelInfo) -> ChatOpenAI:
+    """Return a LangChain ChatOpenAI client configured for OpenRouter."""
+    return ChatOpenAI(
+        model=model_info.slug,
+        api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        base_url=_OPENROUTER_BASE_URL,
+    )
 
-        buffer = ""
-        with httpx.Client(timeout=httpx.Timeout(10.0, read=120.0)) as client:
-            with client.stream("POST", OpenRouterClient.CHAT_COMPLETION_URL, headers=self.headers, json=payload) as r:
-                r.raise_for_status()
-                for chunk in r.iter_text():
-                    buffer += chunk
-                    while True:
-                        line_end = buffer.find('\n')
-                        if line_end == -1:
-                            break
-                        line = buffer[:line_end].strip()
-                        buffer = buffer[line_end + 1:]
-                        if line.startswith('data: '):
-                            data = line[6:]
-                            if data == '[DONE]':
-                                break
-                            try:
-                                data_obj = json.loads(data)
-                                content = data_obj["choices"][0]["delta"].get("content")
-                                if content:
-                                    # print(content, end="", flush=True)
-                                    callback_func(content)
-                            except json.JSONDecodeError:
-                                pass
+def supports_native_tool_calling(model_info: ModelInfo) -> bool:
+    slug = model_info.slug.lower()
+    return slug.startswith(_NATIVE_TOOL_MODEL_PREFIXES)

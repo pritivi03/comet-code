@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from schemas.attempt import AttemptRecord
 from schemas.code_chunk import CodeChunk
@@ -30,7 +30,7 @@ class TaskSession(BaseModel):
     shared_context: SharedContext
     chunk_store: dict[str, CodeChunk]
 
-    attempts: list[AttemptRecord] = []
+    attempts: list[AttemptRecord] = Field(default_factory=list)
 
     final_summary: str | None = None
     final_diff: str | None = None

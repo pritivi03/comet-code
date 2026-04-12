@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 
 class PlanItemType(str, Enum):
@@ -25,7 +25,7 @@ class PlanItem(BaseModel):
     type: PlanItemType
     status: PlanItemStatus
 
-    related_files: list[str] = []
+    related_files: list[str] = Field(default_factory=list)
     notes: str | None = None
 
 class Plan(BaseModel):
