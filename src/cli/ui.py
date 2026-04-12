@@ -166,7 +166,7 @@ def _read_boxed_input(state: ShellState) -> str:
         key_bindings=kb,
         style=_INPUT_STYLE,
         full_screen=False,
-        mouse_support=True,
+        mouse_support=False,
         # Erase the rendered box on exit so the next iteration redraws in
         # the same spot — gives the illusion of a fixed bottom-pinned UI
         # instead of leaving stale toolbars in the scrollback.
