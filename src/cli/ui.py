@@ -27,6 +27,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame, TextArea
 
 from cli.commands import handle_command
+from cli.completer import command_completer
 from cli.render import EventRenderer
 from cli.state import ShellState
 from core.orchestrator import Orchestrator
@@ -112,6 +113,8 @@ def _read_boxed_input(state: ShellState) -> str:
         style="class:text-area",
         focus_on_click=True,
         scrollbar=False,
+        completer=command_completer,
+        complete_while_typing=True,
     )
 
     frame = Frame(text_area, title="comet")

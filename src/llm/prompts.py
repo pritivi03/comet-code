@@ -66,7 +66,10 @@ _TOOL_EXECUTION_POLICY = (
     "If you are running low on useful exploration, synthesize the best answer you can from the evidence already gathered instead of asking for more tool calls.\n"
     "Before a non-trivial tool call, include a short one-line reason when helpful.\n"
     "Skip the reason for obvious repetitive calls.\n"
-    "Never return an empty final response."
+    "Never return an empty final response.\n"
+    "## Code Conventions\n"
+    "Follow the language's standard conventions for the file you are editing: import order, module-level declarations, and file structure.\n"
+    "When inserting new code, respect the existing file's layout — new imports belong with existing imports, not interleaved with other declarations."
 )
 
 _MODE_INSTRUCTIONS: dict[TaskMode, str] = {

@@ -7,6 +7,18 @@ doesn't start with `/` is treated as a user task and handled by the shell.
 
 from __future__ import annotations
 
+# Completable slash commands (used by the prompt_toolkit autocompleter in ui.py)
+SLASH_COMMANDS = [
+    "/help",
+    "/mode", "/mode explain", "/mode debug", "/mode refactor", "/mode implement", "/mode plan",
+    "/explain", "/debug", "/refactor", "/implement", "/plan",
+    "/model",
+    "/tools", "/tools toggle", "/tools collapse", "/tools expand",
+    "/clear",
+    "/exit", "/quit",
+]
+
+
 from dataclasses import dataclass
 
 from rich.console import Console
