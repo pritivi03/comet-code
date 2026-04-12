@@ -81,15 +81,9 @@ START → call_llm ──→ execute_tools ──┐
 ## Getting Started
 
 ```bash
-git clone https://github.com/pritivi03/comet-code
-cd comet-code
+pip install comet-code
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# Add your OpenRouter API key
-echo "OPENROUTER_API_KEY=your_key_here" > .env
-
-python -m main
+comet  # runs the installed console script; will prompt for OpenRouter API key on first use (or set via /key set <key> or OPENROUTER_API_KEY env var)
 ```
 
 ### Slash commands
