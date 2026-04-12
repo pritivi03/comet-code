@@ -14,6 +14,7 @@ from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
+import itertools
 from rich.text import Text
 
 from prompt_toolkit.application import Application
@@ -379,9 +380,19 @@ def run_shell() -> None:
             text=renderer.get_status_text(),
             style="bright_cyan",
         )
+        # Shimmer effect: a single bright highlight moves left‑to‑right across the status text
+        _shimmer_counter = itertools.count()
 
         def _build_run_live_display() -> Group:
-            spinner.update(text=renderer.get_status_text())
+            status_txt = renderer.get_status_text()
+            # Ensure we have a plain string length to work with; fall back to 0 length safety
+            # Determine length of the loading text (exclude token count and elapsed time)
+            loading_len = len(renderer._status_text.plain) if getattr(renderer, "_status_text", None) else 0
+            if loading_len:
+                idx = next(_shimmer_counter) % loading_len
+                # Apply a bright magenta highlight to the current character position (only on loading text)
+                status_txt.stylize("bright_magenta", idx, idx + 1)
+            spinner.update(text=status_txt)
             items: list[object] = [
                 spinner
             ]

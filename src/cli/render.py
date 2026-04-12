@@ -75,10 +75,15 @@ class EventRenderer:
     def get_status_text(self) -> Text:
         txt = self._status_text.copy()
         elapsed = self.get_elapsed_str()
+        # Separator before token count / elapsed time for clarity
         if self._token_count > 0:
+            txt.append(" |", style="dim")
             n = self._token_count
             label = f"~{n/1000:.1f}k" if n >= 1000 else f"~{n}"
             txt.append(f" {label} tokens", style="dim")
+            txt.append(" |", style="dim")
+        else:
+            txt.append(" |", style="dim")
         txt.append(f" {elapsed}", style="dim")
         return txt
 
