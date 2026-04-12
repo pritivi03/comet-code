@@ -1,6 +1,6 @@
 [project]
 name = "comet-code"
-version = "0.1.2"
+version = "0.1.4"
 description = "Agentic CLI coding assistant"
 readme = "README.md"
 requires-python = ">=3.12"

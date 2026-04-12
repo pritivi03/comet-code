@@ -62,6 +62,7 @@ class EventRenderer:
         self._persisted_tool_history_count = 0
         self._token_count: int = 0
         self._start_time: float = time.monotonic()
+        self._pending_final_text: str | None = None
 
     def get_tool_history(self) -> list[dict]:
         return [item.to_dict() for item in self._tool_history]
@@ -248,6 +249,20 @@ class EventRenderer:
             text = (event.text or "").strip()
         if not text:
             text = "No final response text was produced."
+        self._pending_final_text = text
+        self._buffer.clear()
+        self._show_post_tool_transition = False
+
+    def flush_final(self) -> None:
+        """Print the final response panel outside any Live context.
+
+        Called after the Live spinner exits so the terminal's normal scroll
+        buffer is clean — no cursor-up manipulation can confuse scrollback.
+        """
+        text = self._pending_final_text
+        if text is None:
+            return
+        self._pending_final_text = None
 
         if self._collapsed_tools and self._persisted_tool_history_count < len(self._tool_history):
             self.console.print()
@@ -265,8 +280,6 @@ class EventRenderer:
             )
         )
         self.console.print()
-        self._buffer.clear()
-        self._show_post_tool_transition = False
 
     def _render_limit(self, event: StreamEvent) -> None:
         self._show_post_tool_transition = bool(self._tool_history)

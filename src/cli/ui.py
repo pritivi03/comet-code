@@ -420,5 +420,9 @@ def run_shell(api_key: str = "") -> None:
         except Exception as exc:
             console.print(f"\n  [bold red]error:[/bold red] {exc}\n")
         finally:
+            # Flush the response panel after Live exits so it lands in the
+            # terminal's normal scroll buffer — no cursor-up magic from the
+            # Live context can confuse the terminal's scrollback.
+            renderer.flush_final()
             state.last_tool_history = renderer.get_tool_history()
             console.print(Text(f"Cooked for {renderer.get_elapsed_str()}", style="dim"))
