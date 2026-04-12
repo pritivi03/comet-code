@@ -1,4 +1,3 @@
-import os
 from typing import Final
 
 from langchain_openai import ChatOpenAI
@@ -15,11 +14,16 @@ _NATIVE_TOOL_MODEL_PREFIXES: Final[tuple[str, ...]] = (
 )
 
 
-def create_openrouter_llm(model_info: ModelInfo) -> ChatOpenAI:
+def create_openrouter_llm(model_info: ModelInfo, api_key: str) -> ChatOpenAI:
     """Return a LangChain ChatOpenAI client configured for OpenRouter."""
+    if not api_key:
+        raise ValueError(
+            "No OpenRouter API key configured. "
+            "Set OPENROUTER_API_KEY in your environment or run /key set <api-key>."
+        )
     return ChatOpenAI(
         model=model_info.slug,
-        api_key=os.environ.get("OPENROUTER_API_KEY", ""),
+        api_key=api_key,
         base_url=_OPENROUTER_BASE_URL,
     )
 

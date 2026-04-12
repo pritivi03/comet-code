@@ -343,11 +343,11 @@ def _prompt_tool_approval(
 # ---------------------------------------------------------------------------
 
 
-def run_shell() -> None:
+def run_shell(api_key: str = "") -> None:
     """Entrypoint for the interactive Comet shell."""
     console = Console()
     state = ShellState()
-    orchestrator = Orchestrator()
+    orchestrator = Orchestrator(api_key=api_key)
 
     console.print()
     console.print(_build_banner())

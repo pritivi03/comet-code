@@ -15,6 +15,7 @@ SLASH_COMMANDS = [
     "/model",
     "/tools", "/tools toggle", "/tools collapse", "/tools expand",
     "/clear",
+    "/key", "/key show", "/key set", "/key clear",
     "/exit", "/quit",
 ]
 
@@ -26,6 +27,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from cli.state import ShellState
+from config import clear_key, config_file_path, get_stored_key, is_valid_key, mask_key, save_key
 from core.orchestrator import Orchestrator
 from llm.models import AVAILABLE_MODELS, find_model
 from schemas.task import TaskMode
@@ -73,11 +75,59 @@ def _print_help(console: Console) -> None:
         ("/tools",           "show last run tool-call history"),
         ("/tools <toggle|collapse|expand>", "set live tool view mode"),
         ("/clear",           "clear conversation history"),
+        ("/key",             "show current API key source and masked value"),
+        ("/key set <key>",   "save key to ~/.comet/config.json"),
+        ("/key clear",       "remove stored key from config"),
         ("/exit, /quit",     "leave the shell"),
     ]
     for cmd, desc in rows:
         table.add_row(cmd, desc)
     console.print(table)
+
+
+def _cmd_key(console: Console, args: list[str]) -> None:
+    import os
+    subcommand = args[0].lower() if args else "show"
+
+    if subcommand == "set":
+        if len(args) < 2:
+            console.print("[red]usage:[/red] /key set <api-key>")
+            return
+        key = args[1].strip()
+        if not is_valid_key(key):
+            console.print("[red]invalid key:[/red] OpenRouter keys must start with [bold]sk-or-[/bold]")
+            return
+        save_key(key)
+        console.print(
+            f"[bright_cyan]key saved →[/bright_cyan] [bold]{mask_key(key)}[/bold]  "
+            f"[dim]({config_file_path()})[/dim]"
+        )
+        console.print("[dim]restart Comet (or set OPENROUTER_API_KEY) to use the new key in this session[/dim]")
+        return
+
+    if subcommand == "clear":
+        clear_key()
+        console.print(f"[bright_cyan]key removed[/bright_cyan] [dim]({config_file_path()})[/dim]")
+        return
+
+    # show (default)
+    env_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    stored_key = get_stored_key()
+    if env_key:
+        console.print(
+            f"[bright_cyan]key source →[/bright_cyan] [bold]env var[/bold] (OPENROUTER_API_KEY)  "
+            f"[dim]{mask_key(env_key)}[/dim]"
+        )
+    elif stored_key:
+        console.print(
+            f"[bright_cyan]key source →[/bright_cyan] [bold]config file[/bold]  "
+            f"[dim]{mask_key(stored_key)}  ({config_file_path()})[/dim]"
+        )
+    else:
+        console.print(
+            "[yellow]no API key configured[/yellow]  "
+            "[dim]run /key set <key> or set OPENROUTER_API_KEY[/dim]"
+        )
 
 
 def _cmd_mode(console: Console, state: ShellState, args: list[str]) -> None:
@@ -183,6 +233,10 @@ def handle_command(
         orchestrator.reset_history()
         state.last_tool_history = []
         console.print("[bright_cyan]history cleared[/bright_cyan]")
+        return CommandResult(handled=True)
+
+    if name == "key":
+        _cmd_key(console, args)
         return CommandResult(handled=True)
 
     if name == "tools":

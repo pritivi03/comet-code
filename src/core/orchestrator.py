@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from config import resolve_api_key
 from core.graph import build_agent_graph
 from core.graph_state import AgentState
 from llm.models import ModelInfo
@@ -12,7 +13,8 @@ from schemas.task import TaskMode, get_mode_policy_for_task_mode
 
 
 class Orchestrator:
-    def __init__(self) -> None:
+    def __init__(self, api_key: str = "") -> None:
+        self._api_key = api_key
         self._persistent_state: AgentState | None = None
         self._recent_run_artifacts: list[str] = []
 
@@ -57,7 +59,8 @@ class Orchestrator:
         policy = get_mode_policy_for_task_mode(mode)
         tool_style = "native" if supports_native_tool_calling(model) else "json"
 
-        llm = create_openrouter_llm(model)
+        api_key = self._api_key or resolve_api_key() or ""
+        llm = create_openrouter_llm(model, api_key=api_key)
         graph = build_agent_graph(llm=llm, on_event=on_event, request_approval=request_approval)
 
         new_user_msg: dict = {"role": "user", "content": user_request}
