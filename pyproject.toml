@@ -3,7 +3,24 @@ name = "comet-code"
 version = "0.1.0"
 description = "Agentic CLI coding assistant"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
+authors = [
+  { name = "Pritivi Rajkumar" },
+]
+license = { text = "MIT" }
+keywords = ["cli", "coding-assistant", "llm", "agent", "openrouter", "langgraph"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
 dependencies = [
     "typer>=0.12.0",
     "rich>=13.7.0",
@@ -14,6 +31,11 @@ dependencies = [
     "langchain-core>=1.2.28",
     "langchain-openai>=1.1.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/pritivi03/comet-code"
+Repository = "https://github.com/pritivi03/comet-code"
+Issues = "https://github.com/pritivi03/comet-code/issues"
 
 [project.scripts]
 comet = "main:app"
@@ -27,12 +49,7 @@ packages = [
     "src/cli",
     "src/core",
     "src/llm",
-    "src/output",
-    "src/patching",
-    "src/retrieval",
-    "src/sandbox",
     "src/schemas",
     "src/tools",
-    "src/verify",
 ]
 force-include = { "main.py" = "main.py", "src/config.py" = "config.py" }
