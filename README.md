@@ -8,25 +8,7 @@ Built from scratch on **LangGraph** and **OpenRouter**, with a streaming **Rich*
 
 ## Demo
 
-```
-mode → implement
-╭────────────────────────────────────────────────────────────╮
-│ add a /clear command that resets conversation history       │
-╰────────────────────────────────────────────────────────────╯
-
-  tool
-    ● Read src/cli/commands.py done
-    └ def handle_command(text, console, state, orchestrator):
-    ● Edit src/cli/commands.py done
-    └ [ok] replaced 1 occurrence(s)
-
-╭──────────────────────────── response ──────────────────────╮
-│ Added `/clear` — it calls `orchestrator.reset_history()`   │
-│ and clears `state.last_tool_history`.                       │
-╰────────────────────────────────────────────────────────────╯
-
-↓ ~3.2k tokens  Cooked for 8s
-```
+<img alt="Screen Recording 2026-04-19 at 8 03 50 PM" src="https://github.com/user-attachments/assets/5e051a0c-4a59-4204-9fda-06cd7d91126c" />
 
 ---
 
